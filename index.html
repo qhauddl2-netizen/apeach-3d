@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>어피치 복숭아 피하기</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#bfe6ff;font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;user-select:none;-webkit-user-select:none;touch-action:none}
+  canvas{display:block}
+  #hud{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;padding:14px 20px;pointer-events:none;color:#fff;text-shadow:0 2px 0 #e0709a,0 0 8px rgba(224,112,154,.6)}
+  #score{font-size:38px;font-weight:900}
+  #best{font-size:16px;opacity:.95}
+  #lives{font-size:38px;letter-spacing:4px}
+  .heart{display:inline-block;transition:transform .2s}
+  .heart.off{filter:grayscale(1) opacity(.35)}
+  .heart.pop{transform:scale(1.5)}
+  .overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(255,200,220,.55);backdrop-filter:blur(3px);text-align:center;color:#fff}
+  .overlay.hidden{display:none}
+  .overlay h1{margin:0 0 8px;font-size:clamp(34px,7vw,64px);text-shadow:0 4px 0 #e0709a;}
+  .overlay p{margin:6px 0;font-size:clamp(15px,2.5vw,20px);text-shadow:0 2px 0 #e0709a}
+  button{margin-top:18px;padding:14px 44px;font-size:24px;font-weight:900;color:#fff;background:#ff7fa8;border:none;border-radius:40px;cursor:pointer;box-shadow:0 6px 0 #d95b87;font-family:inherit}
+  button:active{transform:translateY(4px);box-shadow:0 2px 0 #d95b87}
+  #final{font-size:clamp(28px,5vw,44px);font-weight:900}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div><div id="score">0</div><div id="best">최고 0</div></div>
+  <div id="lives"></div>
+</div>
+
+<div id="start" class="overlay">
+  <h1>🍑 어피치 복숭아 피하기</h1>
+  <p>하늘에서 떨어지는 복숭아를 피하세요!</p>
+  <p>← → / A D 키, 또는 마우스·터치 드래그로 이동 · 목숨 3개</p>
+  <button id="startBtn">시작하기</button>
+</div>
+<div id="over" class="overlay hidden">
+  <h1>게임 오버</h1>
+  <div id="final">0점</div>
+  <p id="newbest"></p>
+  <button id="retryBtn">다시 하기</button>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  // ---------- 기본 세팅 ----------
+  const W = () => window.innerWidth, H = () => window.innerHeight;
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(W(), H());
+  document.body.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xbfe6ff);
+  scene.fog = new THREE.Fog(0xcfeeff, 25, 70);
+
+  const camera = new THREE.PerspectiveCamera(55, W() / H(), 0.1, 200);
+  const CAM_BASE = new THREE.Vector3(0, 6.5, 12);
+  camera.position.copy(CAM_BASE);
+  camera.lookAt(0, 2, 0);
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xffd6e4, 0.95));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+  sun.position.set(5, 12, 8);
+  scene.add(sun);
+
+  const BOUND = 6.2;
+
+  // ---------- 바닥 & 배경 ----------
+  (function buildWorld() {
+    const c = document.createElement('canvas'); c.width = c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = '#b8f0a8'; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#a6e696'; g.fillRect(0, 0, 64, 64); g.fillRect(64, 64, 64, 64);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(20, 20);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120),
+      new THREE.MeshLambertMaterial({ map: tex }));
+    ground.rotation.x = -Math.PI / 2;
+    scene.add(ground);
+
+    // 구름
+    const cm = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: .95 });
+    window.clouds = [];
+    for (let i = 0; i < 12; i++) {
+      const cl = new THREE.Group();
+      for (let k = 0; k < 4; k++) {
+        const s = new THREE.Mesh(new THREE.SphereGeometry(1 + Math.random() * 1.2, 16, 12), cm);
+        s.position.set(k * 1.5 - 2, Math.random() * .6, Math.random());
+        s.scale.y = .7; cl.add(s);
+      }
+      cl.position.set(-50 + Math.random() * 100, 14 + Math.random() * 14, -20 - Math.random() * 30);
+      cl.userData.sp = .2 + Math.random() * .4;
+      scene.add(cl); clouds.push(cl);
+    }
+    // 길 가장자리 꽃/나무 장식
+    const trunk = new THREE.MeshLambertMaterial({ color: 0xb98a5e });
+    const leaf = new THREE.MeshLambertMaterial({ color: 0x8fdc7a });
+    for (let i = 0; i < 18; i++) {
+      const side = i % 2 ? 1 : -1;
+      const t = new THREE.Group();
+      const tr = new THREE.Mesh(new THREE.CylinderGeometry(.2, .28, 1.6, 8), trunk); tr.position.y = .8;
+      const lf = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 12), leaf); lf.position.y = 2.3;
+      t.add(tr, lf);
+      t.position.set(side * (9 + Math.random() * 10), 0, 6 - Math.random() * 40);
+      scene.add(t);
+    }
+  })();
+
+  // ---------- 어피치 만들기 ----------
+  const mat = (c, extra) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: .45, metalness: 0 }, extra));
+  const PINK = 0xffb3c1, WHITE = 0xffffff, DARK = 0x3a2a30;
+
+  function onSurface(x, y) { // 단위 구 표면의 (x,y)에 해당하는 z
+    return new THREE.Vector3(x, y, Math.sqrt(Math.max(0.0001, 1 - x * x - y * y)));
+  }
+  function faceMesh(mesh, p, push = 1.0) {
+    mesh.position.copy(p).multiplyScalar(push);
+    mesh.lookAt(p.clone().multiplyScalar(3));
+  }
+
+  function makeApeach() {
+    const root = new THREE.Group();
+    const body = new THREE.Group(); root.add(body);
+
+    // 머리: 구를 복숭아(물방울) 모양으로 변형
+    const hg = new THREE.SphereGeometry(1, 64, 48);
+    const pos = hg.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      if (y > 0) {
+        const k = 1 - 0.85 * Math.pow(y, 2.2);
+        x *= k; z *= k; y *= 1.18;
+      } else { y *= 0.92; }
+      pos.setXYZ(i, x, y, z);
+    }
+    hg.computeVertexNormals();
+    const head = new THREE.Mesh(hg, mat(PINK, { roughness: .3 }));
+    const headG = new THREE.Group(); headG.add(head);
+
+    // 얼굴
+    const faceNormal = new THREE.Group(), faceCry = new THREE.Group();
+    headG.add(faceNormal, faceCry);
+    faceCry.visible = false;
+    const tears = [];
+    const fm = (c, o = {}) => new THREE.MeshBasicMaterial(Object.assign({ color: c }, o));
+    // 얼굴 표면에 붙는 원판
+    const disc = (parent, r, color, x, y, push, sx = 1, sy = 1, o) => {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(r, 28), fm(color, o));
+      m.scale.set(sx, sy, 1);
+      faceMesh(m, onSurface(x, y), push);
+      parent.add(m); return m;
+    };
+
+    for (const s of [-1, 1]) {
+      // 볼터치 (항상 표시)
+      const ch = new THREE.Mesh(new THREE.CircleGeometry(.17, 24), mat(0xff6f8f, { roughness: .8 }));
+      ch.scale.set(1.15, .85, 1);
+      faceMesh(ch, onSurface(s * .63, -.3), 1.004);
+      headG.add(ch);
+
+      // ----- 평소 표정: 동그랗게 뜬 눈 -----
+      disc(faceNormal, .115, DARK, s * .4, -.02, 1.003, .85, 1.25);
+      disc(faceNormal, .035, 0xffffff, s * .4 + .025, .04, 1.006);
+
+      // ----- 우는 표정: 흰자 큰 눈 + 눈물 -----
+      disc(faceCry, .21, DARK, s * .42, -.04, 1.003, 1, 1.05);
+      disc(faceCry, .175, 0xffffff, s * .42, -.04, 1.006, 1, 1.05);
+      disc(faceCry, .06, DARK, s * .42, -.09, 1.009);
+      disc(faceCry, .02, 0xffffff, s * .42 + .02, -.06, 1.012);
+      for (const [tx, ty] of [[.5, -.2], [.56, -.34]]) {
+        const t = disc(faceCry, .1, 0x8fd8ff, s * tx, ty, 1.007, .55, 1.9, { transparent: true, opacity: .9 });
+        t.userData.ph = Math.random() * 6; tears.push(t);
+      }
+    }
+    // 평소 입: 크게 벌린 입 + 이빨 + 혀
+    const mouthN = new THREE.Mesh(new THREE.CircleGeometry(.2, 28, Math.PI, Math.PI), fm(0x8a1a2e));
+    mouthN.scale.set(1.05, 1.15, 1);
+    faceMesh(mouthN, onSurface(0, -.3), 1.003); faceNormal.add(mouthN);
+    disc(faceNormal, .05, 0xffffff, .0, -.33, 1.006, 1, 1);
+    disc(faceNormal, .09, 0xff7a95, 0, -.5, 1.006, 1.4, .6);
+    // 우는 입: 처진 입
+    const mouthC = new THREE.Mesh(new THREE.TorusGeometry(.12, .035, 8, 20, Math.PI), mat(DARK));
+    faceMesh(mouthC, onSurface(0, -.5), 1.0);
+    faceCry.add(mouthC);
+
+    headG.position.y = 2.0;
+    headG.scale.setScalar(.95);
+    body.add(headG);
+
+    // 몸 (하얀 아기 몸)
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(.55, 32, 24), mat(WHITE, { roughness: .5 }));
+    torso.scale.set(1, 1.05, .9); torso.position.y = .95; body.add(torso);
+
+    const mkLimb = (r, len) => {
+      const g = new THREE.Group();
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 16), mat(WHITE, { roughness: .5 }));
+      m.scale.y = (len + 2 * r) / (2 * r);
+      m.position.y = -len / 2; g.add(m); return g;
+    };
+    const armL = mkLimb(.15, .25), armR = mkLimb(.15, .25);
+    armL.position.set(-.55, 1.15, 0); armR.position.set(.55, 1.15, 0);
+    armL.rotation.z = .35; armR.rotation.z = -.35;
+    const legL = mkLimb(.2, .3), legR = mkLimb(.2, .3);
+    legL.position.set(-.27, .55, 0); legR.position.set(.27, .55, 0);
+    body.add(armL, armR, legL, legR);
+
+    return { root, body, headG, armL, armR, legL, legR, faceNormal, faceCry, tears };
+  }
+
+  const apeach = makeApeach();
+  scene.add(apeach.root);
+
+  // ---------- 복숭아(장애물) ----------
+  const peachGeo = (() => {
+    const g = new THREE.SphereGeometry(.55, 28, 22);
+    const p = g.attributes.position; const cols = [];
+    const top = new THREE.Color(0xffe2a8), bot = new THREE.Color(0xff8fa3), c = new THREE.Color();
+    for (let i = 0; i < p.count; i++) {
+      let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      if (y > 0) { const k = 1 - .25 * (y / .55); x *= k; z *= k; }
+      p.setXYZ(i, x, y, z);
+      c.copy(bot).lerp(top, THREE.MathUtils.clamp((y + .55) / 1.1, 0, 1) * .8);
+      cols.push(c.r, c.g, c.b);
+    }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+    g.computeVertexNormals();
+    return g;
+  })();
+  const peachMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .5 });
+  const leafGeo = new THREE.SphereGeometry(.2, 12, 8);
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x59c256 });
+  const shadowGeo = new THREE.CircleGeometry(.6, 24);
+  const particleGeo = new THREE.SphereGeometry(.09, 8, 6);
+  const particleMat = new THREE.MeshBasicMaterial({ color: 0xff9db5 });
+
+  const peaches = [], particles = [];
+  function spawnPeach(speed, aimX) {
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(peachGeo, peachMat));
+    const lf = new THREE.Mesh(leafGeo, leafMat);
+    lf.scale.set(1.6, .4, 1); lf.position.set(.12, .6, 0); lf.rotation.z = -.5; g.add(lf);
+    const x = aimX !== undefined ? aimX : (Math.random() * 2 - 1) * BOUND;
+    const z = (Math.random() * 2 - 1) * .5;
+    g.position.set(THREE.MathUtils.clamp(x, -BOUND, BOUND), 17, z);
+    const sh = new THREE.Mesh(shadowGeo, new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, depthWrite: false }));
+    sh.rotation.x = -Math.PI / 2; sh.position.set(g.position.x, .02, z);
+    scene.add(g, sh);
+    peaches.push({ g, sh, v: speed, spin: (Math.random() - .5) * 4 });
+  }
+  function burst(pos, n = 10, color) {
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(particleGeo, color ? new THREE.MeshBasicMaterial({ color }) : particleMat);
+      m.position.copy(pos);
+      scene.add(m);
+      particles.push({ m, v: new THREE.Vector3((Math.random() - .5) * 6, Math.random() * 5 + 1, (Math.random() - .5) * 6), life: .7 });
+    }
+  }
+  function removePeach(i) {
+    const p = peaches[i];
+    scene.remove(p.g, p.sh); p.sh.material.dispose();
+    peaches.splice(i, 1);
+  }
+
+  // ---------- 소리 ----------
+  let actx;
+  function beep(f, d = .12, type = 'sine', vol = .15, slide = 0) {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.value = f;
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f + slide), actx.currentTime + d);
+      g.gain.setValueAtTime(vol, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.001, actx.currentTime + d);
+      o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + d);
+    } catch (e) {}
+  }
+
+  // ---------- 게임 상태 ----------
+  const $ = id => document.getElementById(id);
+  let state = 'ready', score = 0, lives = 3, t = 0, spawnT = 0, invuln = 0, shake = 0;
+  let best = 0; try { best = +localStorage.getItem('apeachBest') || 0; } catch (e) {}
+  let px = 0, targetX = 0, vx = 0, dropT = 0;
+  const keys = {};
+
+  function renderLives() {
+    $('lives').innerHTML = [0, 1, 2].map(i => `<span class="heart ${i < lives ? '' : 'off'}">❤️</span>`).join('');
+  }
+  function renderScore() { $('score').textContent = Math.floor(score); $('best').textContent = '최고 ' + Math.floor(best); }
+  renderLives(); renderScore();
+
+  function startGame() {
+    peaches.slice().forEach((_, i) => removePeach(0));
+    score = 0; lives = 3; t = 0; spawnT = .5; invuln = 0; shake = 0;
+    px = targetX = 0; vx = 0;
+    apeach.root.rotation.set(0, 0, 0); apeach.root.position.set(0, 0, 0); apeach.root.visible = true;
+    state = 'play';
+    $('start').classList.add('hidden'); $('over').classList.add('hidden');
+    renderLives(); renderScore();
+    beep(660, .15, 'triangle', .15, 300);
+  }
+  function gameOver() {
+    state = 'over';
+    const nb = score > best;
+    if (nb) { best = score; try { localStorage.setItem('apeachBest', Math.floor(best)); } catch (e) {} }
+    $('final').textContent = Math.floor(score) + '점';
+    $('newbest').textContent = nb ? '🎉 최고 기록 갱신!' : '최고 기록 ' + Math.floor(best) + '점';
+    renderScore();
+    setTimeout(() => $('over').classList.remove('hidden'), 900);
+    beep(300, .6, 'sawtooth', .15, -200);
+  }
+  function hit(peach) {
+    lives--; invuln = 1.6; shake = .5;
+    burst(peach.g.position, 18, 0xff7fa8);
+    const h = $('lives').children[lives]; renderLives();
+    $('lives').children[lives]?.classList.add('pop');
+    beep(180, .3, 'square', .18, -100);
+    if (lives <= 0) gameOver();
+  }
+
+  $('startBtn').onclick = startGame;
+  $('retryBtn').onclick = startGame;
+  addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if ((e.code === 'Enter' || e.code === 'Space') && state !== 'play') {
+      if (state === 'ready' || !$('over').classList.contains('hidden')) startGame();
+    }
+  });
+  addEventListener('keyup', e => keys[e.code] = false);
+  let dragging = false;
+  function pointerTo(cx) { targetX = ((cx / W()) * 2 - 1) * (BOUND + 1.5); targetX = THREE.MathUtils.clamp(targetX, -BOUND, BOUND); }
+  addEventListener('pointerdown', e => { dragging = true; if (state === 'play') pointerTo(e.clientX); });
+  addEventListener('pointermove', e => { if ((dragging || e.pointerType === 'mouse') && state === 'play') pointerTo(e.clientX); });
+  addEventListener('pointerup', () => dragging = false);
+  addEventListener('resize', () => {
+    renderer.setSize(W(), H()); camera.aspect = W() / H();
+    CAM_BASE.z = camera.aspect < 1 ? 16 : 12; camera.updateProjectionMatrix();
+  });
+  CAM_BASE.z = camera.aspect < 1 ? 16 : 12;
+
+  // ---------- 메인 루프 ----------
+  const clock = new THREE.Clock();
+  function loop() {
+    requestAnimationFrame(loop);
+    const dt = Math.min(clock.getDelta(), .05), time = clock.elapsedTime;
+
+    clouds.forEach(c => { c.position.x += c.userData.sp * dt; if (c.position.x > 60) c.position.x = -60; });
+
+    let moving = 0;
+    if (state === 'play') {
+      t += dt; score += dt * 2;
+      // 이동
+      const k = (keys.ArrowRight || keys.KeyD ? 1 : 0) - (keys.ArrowLeft || keys.KeyA ? 1 : 0);
+      if (k) targetX = THREE.MathUtils.clamp(targetX + k * 11 * dt, -BOUND, BOUND);
+      const prev = px;
+      px += (targetX - px) * Math.min(1, dt * 10);
+      vx = (px - prev) / dt; moving = Math.min(1, Math.abs(vx) / 4);
+
+      // 스폰 (시간이 지날수록 빨라지고 많아짐)
+      spawnT -= dt;
+      if (spawnT <= 0) {
+        const speed = Math.min(8 + t * .12, 20) + Math.random() * 2;
+        const aim = Math.random() < .4 ? px + (Math.random() - .5) * 1.5 : undefined; // 일부는 플레이어를 노림
+        spawnPeach(speed, aim);
+        if (t > 25 && Math.random() < .3) spawnPeach(speed, undefined);
+        spawnT = Math.max(.25, .95 - t * .011);
+      }
+      if (invuln > 0) invuln -= dt;
+    }
+
+    // 복숭아 업데이트
+    for (let i = peaches.length - 1; i >= 0; i--) {
+      const p = peaches[i];
+      p.g.position.y -= p.v * dt; p.v += 6 * dt;
+      p.g.rotation.x += p.spin * dt; p.g.rotation.z += p.spin * .5 * dt;
+      const h = p.g.position.y;
+      const near = THREE.MathUtils.clamp(1 - h / 17, 0, 1);
+      p.sh.material.opacity = .08 + near * .3;
+      p.sh.scale.setScalar(.5 + near * .7);
+
+      if (state === 'play' && invuln <= 0 && h < 2.6 && h > .1) {
+        const dx = p.g.position.x - px, dz = p.g.position.z;
+        if (Math.abs(dx) < .85 && Math.abs(dz) < .85) { hit(p); removePeach(i); continue; }
+      }
+      if (h <= .5) {
+        burst(new THREE.Vector3(p.g.position.x, .4, p.g.position.z), 8);
+        if (state === 'play') { score += 10; beep(880 + Math.random() * 200, .08, 'sine', .08); }
+        removePeach(i);
+      }
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i]; p.life -= dt;
+      p.v.y -= 16 * dt; p.m.position.addScaledVector(p.v, dt);
+      p.m.scale.setScalar(Math.max(.01, p.life / .7));
+      if (p.life <= 0) { scene.remove(p.m); particles.splice(i, 1); }
+    }
+
+    // 어피치 애니메이션
+    const a = apeach;
+    a.root.position.x = px;
+    // 표정: 맞은 직후/게임 오버면 울음
+    const crying = state === 'over' || invuln > 0;
+    a.faceNormal.visible = !crying; a.faceCry.visible = crying;
+    if (crying) a.tears.forEach(t => { t.scale.y = 1.7 + Math.sin(time * 9 + t.userData.ph) * .5; });
+    if (state === 'over') {
+      a.root.rotation.z += (Math.PI / 2 - a.root.rotation.z) * Math.min(1, dt * 5);
+      a.root.position.y += (.55 - a.root.position.y) * Math.min(1, dt * 5);
+    } else {
+      const sw = Math.sin(time * 16) * .7 * moving;
+      a.legL.rotation.x = sw; a.legR.rotation.x = -sw;
+      // 신나서 양팔을 위아래로 흔들기 (바깥쪽으로 올렸다 내렸다)
+      const wave = 1.5 + Math.sin(time * 14) * 1.0;
+      a.armL.rotation.x = 0; a.armR.rotation.x = 0;
+      a.armL.rotation.z = -wave; a.armR.rotation.z = wave;
+      a.body.position.y = Math.abs(Math.sin(time * 16)) * .12 * moving + Math.sin(time * 3) * .02;
+      a.root.rotation.z = -vx * .012;
+      a.headG.rotation.z = Math.sin(time * 2) * .04 - vx * .01;
+      a.headG.rotation.y = 0;
+      a.root.visible = invuln > 0 ? Math.floor(time * 14) % 2 === 0 : true;
+    }
+    if (state === 'ready') { a.root.rotation.y = Math.sin(time * 1.2) * .35; } else a.root.rotation.y *= .9;
+
+    // 카메라 (살짝 따라가며 흔들림)
+    shake = Math.max(0, shake - dt);
+    camera.position.set(CAM_BASE.x + px * .35 + (Math.random() - .5) * shake * .6, CAM_BASE.y + (Math.random() - .5) * shake * .6, CAM_BASE.z);
+    camera.lookAt(px * .5, 5.5, 0); // 시선을 위로 → 캐릭터가 화면 아래로 내려가 하늘이 더 보임
+
+    renderer.render(scene, camera);
+    if (state === 'play') renderScore();
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
