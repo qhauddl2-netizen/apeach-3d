@@ -28,6 +28,12 @@
   #barWrap{height:16px;border-radius:10px;background:rgba(255,255,255,.55);border:2px solid #fff;overflow:hidden;box-shadow:0 2px 0 #e0709a}
   #bar{height:100%;width:0;background:linear-gradient(90deg,#ff9fbd,#ff6f9a);transition:width .15s}
   #barTxt{font-size:13px;margin-top:2px}
+  @media (max-width:700px){
+    #hud{flex-wrap:wrap;padding:10px 12px}
+    #mid{order:3;flex:0 0 100%;max-width:none;margin:8px 0 0}
+    #stageLbl{font-size:24px} #score{font-size:22px}
+    .lifepill{font-size:24px;padding:2px 14px 2px 6px} .lifepill svg{width:34px;height:34px}
+  }
   #lives{font-size:34px;letter-spacing:3px;white-space:nowrap}
   .lifepill{display:flex;align-items:center;gap:8px;background:rgba(70,130,220,.55);border:3px solid rgba(255,255,255,.75);border-radius:34px;padding:3px 18px 3px 8px;font-size:30px;font-weight:900;box-shadow:0 3px 0 rgba(40,90,180,.35)}
   #score::before{content:"⭐ "}
@@ -50,7 +56,7 @@
   button:active{transform:translateY(4px);box-shadow:0 2px 0 #d95b87}
   #touch{display:none}
   body.touch #touch{display:block}
-  #padL{position:fixed;left:0;bottom:0;width:55%;height:55%}
+  #padL{position:fixed;left:0;bottom:0;width:45%;height:50%}
   #stick{position:fixed;width:90px;height:90px;margin:-45px 0 0 -45px;border-radius:50%;background:rgba(255,255,255,.35);border:3px solid rgba(255,255,255,.8);display:none;pointer-events:none}
   #knob{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:rgba(255,127,168,.85)}
   #jumpBtn{position:fixed;right:24px;bottom:34px;width:96px;height:96px;border-radius:50%;margin:0;padding:0;font-size:20px;opacity:.9}
@@ -447,6 +453,7 @@
   try { best = +localStorage.getItem('apeachBest2') || 0; unlocked = clamp(+localStorage.getItem('apeachUnlocked') || 1, 1, 20); } catch (e) {}
   const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, cloud: null, coyote: 0, jumpBuf: 0, yaw: 0, jumps: 0, spring: false, pogo: false };
   let camZoom = 1, camZoomS = 1; // 확대/축소 배율 (작을수록 가까움)
+  let camOff = 0; // 드래그로 돌린 임시 시점 보정값 (이동하면 0으로 돌아옴)
   let camYaw = 0, camYawS = 0; // 카메라가 바라보는 방향(목표/부드러운 값). 0이면 -z 방향을 봄
   const keys = {}; const joy = { x: 0, z: 0 };
 
@@ -461,7 +468,7 @@
     const c = stageClouds[0];
     P.x = c.pos.x; P.y = c.pos.y; P.z = c.pos.z; P.vx = P.vy = P.vz = 0; P.cloud = c; P.coyote = 0; P.jumpBuf = 0;
     checkpoint = c; maxIdx = 0;
-    P.yaw = 0; camYaw = camYawS = 0; apeach.root.rotation.set(0, 0, 0); apeach.body.rotation.x = 0;
+    P.yaw = 0; camYaw = camYawS = 0; camOff = 0; apeach.root.rotation.set(0, 0, 0); apeach.body.rotation.x = 0;
   }
 
   function beginStage(s, carryScore) {
@@ -652,7 +659,7 @@
   const pinchOk = e => e.touches.length === 2 && ![...e.touches].some(t => t.target === $('jumpBtn'));
   const releaseJoy = () => { joyId = null; joy.x = joy.z = 0; stick.style.display = 'none'; knob.style.transform = ''; };
   // 두 손가락이 닿으면 조이스틱을 해제하고 핀치 줌을 우선한다
-  addEventListener('touchstart', e => { if (pinchOk(e)) { pinchD = touchDist(e.touches); releaseJoy(); } else pinchD = 0; }, { passive: true });
+  addEventListener('touchstart', e => { if (pinchOk(e)) { pinchD = touchDist(e.touches); releaseJoy(); lookId = null; } else pinchD = 0; }, { passive: true });
   // iOS 사파리 기본 확대 제스처 차단
   ['gesturestart', 'gesturechange', 'gestureend'].forEach(n => addEventListener(n, e => e.preventDefault(), { passive: false }));
   addEventListener('touchmove', e => {
@@ -663,10 +670,20 @@
   }, { passive: true });
   addEventListener('touchend', () => { pinchD = 0; }, { passive: true });
   // 마우스 드래그로 시점 회전
-  let mouseDrag = false;
-  renderer.domElement.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') mouseDrag = true; });
-  addEventListener('pointerup', () => mouseDrag = false);
-  addEventListener('pointermove', e => { if (mouseDrag && e.pointerType === 'mouse' && state === 'play') camYaw -= e.movementX * .006; });
+  // (PC: 마우스 드래그 / 모바일: 한 손가락 좌우 드래그) → 보는 방향만 임시로 돌림
+  let mouseDrag = false, lookId = null, lookX = 0;
+  const addLook = d => { camOff = clamp(camOff + d, -Math.PI, Math.PI); };
+  renderer.domElement.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse') mouseDrag = true;
+    else if (lookId === null) { lookId = e.pointerId; lookX = e.clientX; }
+  });
+  const endLook = e => { if (e.pointerType === 'mouse') mouseDrag = false; if (e.pointerId === lookId) lookId = null; };
+  addEventListener('pointerup', endLook); addEventListener('pointercancel', endLook);
+  addEventListener('pointermove', e => {
+    if (state !== 'play') return;
+    if (e.pointerType === 'mouse') { if (mouseDrag) addLook(-e.movementX * .006); }
+    else if (e.pointerId === lookId) { addLook(-(e.clientX - lookX) * .008); lookX = e.clientX; }
+  });
 
   // 버튼
   $('startBtn').onclick = () => beginStage(1, 0);
@@ -720,6 +737,8 @@
     camYaw += turn * 2.4 * dt;
     const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) - joy.z;
     const side = (keys.KeyE ? 1 : 0) - (keys.KeyQ ? 1 : 0);
+    // 다시 움직이면 어피치 뒤(기본 추적 시점)로 부드럽게 복귀
+    if (turn || fwd || side) { camOff *= Math.exp(-dt * 5); if (Math.abs(camOff) < .01) camOff = 0; }
     let ix = side, iz = -fwd; // 카메라 기준 로컬 입력(오른쪽+, 뒤+)
     const m = Math.hypot(ix, iz); if (m > 1) { ix /= m; iz /= m; }
     const cs = Math.cos(camYaw), sn = Math.sin(camYaw);
@@ -904,7 +923,7 @@
 
     // 카메라
     shake = Math.max(0, shake - dt);
-    camYawS += (camYaw - camYawS) * (1 - Math.exp(-dt * 12));
+    camYawS += (camYaw + camOff - camYawS) * (1 - Math.exp(-dt * 12));
     camZoomS += (camZoom - camZoomS) * (1 - Math.exp(-dt * 10));
     const [tp, tl] = camTargets();
     const kx = 1 - Math.exp(-dt * 14), ky = 1 - Math.exp(-dt * 6);
