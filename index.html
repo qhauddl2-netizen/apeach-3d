@@ -29,8 +29,11 @@
   #bar{height:100%;width:0;background:linear-gradient(90deg,#ff9fbd,#ff6f9a);transition:width .15s}
   #barTxt{font-size:13px;margin-top:2px}
   @media (max-width:700px){
-    #hud{flex-wrap:wrap;padding:10px 12px}
-    #mid{order:3;flex:0 0 100%;max-width:none;margin:8px 0 0}
+    #hud{padding:10px 12px}
+    #barWrap{display:none}
+    #mid{order:1;flex:0 0 auto;max-width:none;margin:0 10px 0 auto;padding-top:6px}
+    #barTxt{font-size:20px;font-weight:900;margin-top:0;white-space:nowrap}
+    #lives{order:2}
     #stageLbl{font-size:24px} #score{font-size:22px}
     .lifepill{font-size:24px;padding:2px 14px 2px 6px} .lifepill svg{width:34px;height:34px}
   }
@@ -670,9 +673,9 @@
   }, { passive: true });
   addEventListener('touchend', () => { pinchD = 0; }, { passive: true });
   // 마우스 드래그로 시점 회전
-  // (PC: 마우스 드래그 / 모바일: 한 손가락 좌우 드래그) → 보는 방향만 임시로 돌림
+  // (PC: 마우스 드래그 / 모바일: 한 손가락 좌우 드래그) → 시점과 어피치의 정면 방향을 함께 돌림
   let mouseDrag = false, lookId = null, lookX = 0;
-  const addLook = d => { camOff = clamp(camOff + d, -Math.PI, Math.PI); };
+  const addLook = d => { camYaw += d; };
   renderer.domElement.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse') mouseDrag = true;
     else if (lookId === null) { lookId = e.pointerId; lookX = e.clientX; }
