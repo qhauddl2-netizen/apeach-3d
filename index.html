@@ -11,6 +11,7 @@
   #stageLbl{font-size:30px;font-weight:900}
   #score{font-size:26px;font-weight:900}
   #best{font-size:14px;opacity:.95}
+  #fx{font-size:14px;font-weight:700;margin-top:6px;line-height:1.5}
   #mid{flex:1;max-width:340px;margin:6px 14px 0;text-align:center}
   #barWrap{height:16px;border-radius:10px;background:rgba(255,255,255,.55);border:2px solid #fff;overflow:hidden;box-shadow:0 2px 0 #e0709a}
   #bar{height:100%;width:0;background:linear-gradient(90deg,#ff9fbd,#ff6f9a);transition:width .15s}
@@ -40,7 +41,7 @@
 </head>
 <body>
 <div id="hud">
-  <div><div id="stageLbl">1탄</div><div id="score">0</div><div id="best">최고 0</div></div>
+  <div><div id="stageLbl">1탄</div><div id="score">0</div><div id="best">최고 0</div><div id="fx"></div></div>
   <div id="mid"><div id="barWrap"><div id="bar"></div></div><div id="barTxt">0%</div></div>
   <div id="lives"></div>
 </div>
@@ -49,7 +50,7 @@
 <div id="start" class="overlay">
   <h1>🧱 어피치 하늘 오르기 🍑</h1>
   <p>벽돌 블록을 밟고 점프해서 하늘 끝까지 올라가세요!<br>떨어지는 복숭아를 피하세요. 총 20탄 · 목숨 3개</p>
-  <p>이동: WASD / 방향키 &nbsp;·&nbsp; 점프: Space &nbsp;·&nbsp; 모바일: 왼쪽 드래그 + 점프 버튼</p>
+  <p>A/D(←/→): 좌우 회전 &nbsp;·&nbsp; W/S(↑/↓): 앞/뒤 &nbsp;·&nbsp; Q/E: 옆걸음 &nbsp;·&nbsp; Space: 점프<br>🔩스프링(점프력 2배) · 🐰콩콩이(2단 점프) 아이템을 먹으면 그 탄 동안 효과가 있어요<br>마우스 드래그: 시점 회전 &nbsp;·&nbsp; 마우스 휠 / 두 손가락 핀치: 확대·축소 &nbsp;·&nbsp; 모바일: 왼쪽 드래그(좌우=회전, 위아래=이동) + 점프 버튼</p>
   <div><button id="startBtn">1탄부터 시작</button><button id="contBtn" class="sub" style="display:none">이어하기</button></div>
 </div>
 <div id="clear" class="overlay hidden">
@@ -71,7 +72,7 @@
   <button id="againBtn">처음부터 다시</button>
 </div>
 
-<div id="touch"><div id="padL"></div><div id="stick"><div id="knob"></div></div><button id="jumpBtn">점프</button></div>
+<div id="touch"><div id="padL"></div><div id="stick"><div id="knob"></div></div><button id="jumpBtn">JUMP</button></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
@@ -178,6 +179,8 @@
   const ghostMat = new THREE.MeshBasicMaterial({ color: 0xff3d85, transparent: true, opacity: .7, depthTest: false, depthWrite: false, fog: false });
   ghost.traverse(o => { if (o.isMesh) o.material = ghostMat; });
   ghostScene.add(ghost);
+  const mkAura = c => { const m = new THREE.Mesh(new THREE.RingGeometry(.75, .95, 32), new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide, transparent: true, opacity: .85 })); m.rotation.x = -Math.PI / 2; m.visible = false; playerScene.add(m); return m; };
+  const auraSpring = mkAura(0xffd02e), auraPogo = mkAura(0xb28cff);
   // 어피치 발밑 그림자 (착지 지점 표시)
   const playerShadow = new THREE.Mesh(new THREE.CircleGeometry(.8, 28), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: .4, depthWrite: false, fog: false }));
   playerShadow.rotation.x = -Math.PI / 2; playerShadow.visible = false; scene.add(playerShadow);
@@ -411,7 +414,9 @@
   let spawnT = 1, rainCd = 10, rainLeft = 0, rainT = 0, maxIdx = 0, checkpoint = null, clearBonusText = '';
   let best = 0, unlocked = 1;
   try { best = +localStorage.getItem('apeachBest2') || 0; unlocked = clamp(+localStorage.getItem('apeachUnlocked') || 1, 1, 20); } catch (e) {}
-  const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, cloud: null, coyote: 0, jumpBuf: 0, yaw: 0 };
+  const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, cloud: null, coyote: 0, jumpBuf: 0, yaw: 0, jumps: 0, spring: false, pogo: false };
+  let camZoom = 1, camZoomS = 1; // 확대/축소 배율 (작을수록 가까움)
+  let camYaw = 0, camYawS = 0; // 카메라가 바라보는 방향(목표/부드러운 값). 0이면 -z 방향을 봄
   const keys = {}; const joy = { x: 0, z: 0 };
 
   function renderLives() { $('lives').innerHTML = [0, 1, 2].map(i => `<span class="heart ${i < lives ? '' : 'off'}">❤️</span>`).join(''); }
@@ -424,14 +429,15 @@
     const c = stageClouds[0];
     P.x = c.pos.x; P.y = c.pos.y; P.z = c.pos.z; P.vx = P.vy = P.vz = 0; P.cloud = c; P.coyote = 0; P.jumpBuf = 0;
     checkpoint = c; maxIdx = 0;
-    P.yaw = 0; apeach.root.rotation.set(0, 0, 0); apeach.body.rotation.x = 0;
+    P.yaw = 0; camYaw = camYawS = 0; apeach.root.rotation.set(0, 0, 0); apeach.body.rotation.x = 0;
   }
 
   function beginStage(s, carryScore) {
     stage = s; lives = 3; invuln = 0; shake = 0; rainLeft = 0; rainCd = 9; spawnT = 1.5;
     score = carryScore; stageStartScore = carryScore;
-    clearPeaches();
-    buildStage(s); resetPlayerToStart(); snapCamera();
+    clearPeaches(); clearConfetti(); clearItems();
+    P.spring = P.pogo = false; itemT = 4; updateFxHud(); // 탄이 바뀌면 아이템 효과 초기화
+    buildStage(s); resetPlayerToStart(); P.yaw = Math.PI; snapCamera();
     $('stageLbl').textContent = s + '탄';
     renderLives(); renderScore(); updateBar();
     showOnly(null); state = 'play';
@@ -439,15 +445,102 @@
     beep(660, .15, 'triangle', .12, 300);
   }
 
+  // ---- 아이템: 스프링(점프력 2배) / 콩콩이(2단 점프) ----
+  const items = []; let itemT = 4;
+  const ITEM_INFO = { spring: { icon: '🔩', name: '스프링', desc: '점프력 2배!' }, pogo: { icon: '🐰', name: '콩콩이', desc: '2단 점프 가능!' } };
+  function makeItemMesh(type) {
+    const g = new THREE.Group();
+    const std = c => new THREE.MeshStandardMaterial({ color: c, roughness: .35, metalness: .3 });
+    if (type === 'spring') {
+      for (let i = 0; i < 5; i++) { const t = new THREE.Mesh(new THREE.TorusGeometry(.28, .06, 8, 18), std(0xffc400)); t.rotation.x = Math.PI / 2; t.position.y = .14 + i * .12; g.add(t); }
+      for (const y of [.05, .8]) { const d = new THREE.Mesh(new THREE.CylinderGeometry(.36, .36, .07, 20), std(0xff5a8a)); d.position.y = y; g.add(d); }
+    } else {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05, .05, 1.2, 10), std(0xb28cff)); pole.position.y = .7; g.add(pole);
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(.045, .045, .55, 10), std(0xffffff)); bar.rotation.z = Math.PI / 2; bar.position.y = 1.3; g.add(bar);
+      for (const s of [-1, 1]) { const peg = new THREE.Mesh(new THREE.BoxGeometry(.22, .05, .12), std(0xffffff)); peg.position.set(s * .15, .5, 0); g.add(peg); }
+      for (let i = 0; i < 3; i++) { const t = new THREE.Mesh(new THREE.TorusGeometry(.12, .035, 8, 14), std(0xff7fa8)); t.rotation.x = Math.PI / 2; t.position.y = .1 + i * .1; g.add(t); }
+    }
+    const ring = new THREE.Mesh(new THREE.RingGeometry(.55, .7, 28), new THREE.MeshBasicMaterial({ color: type === 'spring' ? 0xffe066 : 0xd2b8ff, side: THREE.DoubleSide, transparent: true, opacity: .8 }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = .03; g.add(ring);
+    g.scale.setScalar(1.15);
+    return g;
+  }
+  function spawnItem() {
+    if (items.length >= 2) return;
+    const types = ['spring', 'pogo'].filter(t => !P[t] && !items.some(it => it.type === t));
+    const cands = stageClouds.filter(c => c.solid && c.kind !== 'crumble' && c.kind !== 'start' && !c.goal && c.i >= maxIdx - 1 && c.i <= maxIdx + 6 && !items.some(it => it.c === c));
+    if (!types.length || !cands.length) return;
+    const type = types[(Math.random() * types.length) | 0], c = cands[(Math.random() * cands.length) | 0];
+    const mesh = makeItemMesh(type); scene.add(mesh);
+    items.push({ type, mesh, c, ox: (Math.random() - .5) * c.hx * 1.2, oz: (Math.random() - .5) * c.hz * 1.2, y: c.pos.y + 10, landed: false, age: 0 });
+  }
+  function removeItem(i) { scene.remove(items[i].mesh); items.splice(i, 1); }
+  function clearItems() { while (items.length) removeItem(0); }
+  function updateFxHud() {
+    $('fx').innerHTML = ['spring', 'pogo'].filter(t => P[t]).map(t => `<span>${ITEM_INFO[t].icon} ${ITEM_INFO[t].name}: ${ITEM_INFO[t].desc}</span>`).join('<br>');
+  }
+  function updateItems(dt) {
+    if (state === 'play') {
+      itemT -= dt;
+      if (itemT <= 0) { spawnItem(); itemT = 7 + Math.random() * 6; }
+    }
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i], c = it.c; it.age += dt;
+      const top = c.pos.y;
+      if (!it.landed) {
+        it.y -= 9 * dt;
+        if (it.y <= top) { it.y = top; it.landed = true; burst(new THREE.Vector3(c.pos.x + it.ox, top + .3, c.pos.z + it.oz), 8, 0xfff2a0); }
+      }
+      const bob = it.landed ? .55 + Math.sin(time * 3 + i) * .12 : .55;
+      it.mesh.position.set(c.pos.x + it.ox, it.y + bob, c.pos.z + it.oz);
+      it.mesh.rotation.y += 2 * dt;
+      if (it.age > 30 || (it.landed && c.i < maxIdx - 5)) { removeItem(i); continue; }
+      if (state === 'play') {
+        const dx = it.mesh.position.x - P.x, dz = it.mesh.position.z - P.z, dy = it.mesh.position.y - P.y;
+        if (dx * dx + dz * dz < 1 && dy > -.6 && dy < 2.6) {
+          P[it.type] = true; updateFxHud();
+          burst(it.mesh.position.clone(), 14, 0xffe066);
+          beep(880, .1, 'triangle', .12, 400); beep(1320, .15, 'triangle', .12, 300, .09);
+          banner('', `${ITEM_INFO[it.type].icon} ${ITEM_INFO[it.type].name} 획득! ${ITEM_INFO[it.type].desc}`);
+          removeItem(i);
+        }
+      }
+    }
+  }
+
+  // ---- 골 도달 색종이 파티클 ----
+  const confetti = [], confettiGeo = new THREE.PlaneGeometry(.2, .14);
+  const confettiMats = [0xff5a8a, 0xffd45e, 0x6fe0a0, 0x6fb0ff, 0xb28cff, 0xff9d5c].map(c => new THREE.MeshBasicMaterial({ color: c, side: THREE.DoubleSide }));
+  let confettiT = 0;
+  function clearConfetti() { confettiT = 0; while (confetti.length) scene.remove(confetti.pop().m); }
+  function updateConfetti(dt) {
+    if (confettiT > 0) {
+      confettiT -= dt;
+      for (let i = 0; i < 4 && confetti.length < 220; i++) { // 어피치 머리 위에서 생성
+        const m = new THREE.Mesh(confettiGeo, confettiMats[(Math.random() * confettiMats.length) | 0]);
+        m.position.set(P.x + (Math.random() - .5) * 5, P.y + 6 + Math.random() * 3, P.z + (Math.random() - .5) * 5);
+        m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+        scene.add(m);
+        confetti.push({ m, vy: -(2.5 + Math.random() * 2.5), sp: (Math.random() - .5) * 8, ph: Math.random() * 6 });
+      }
+    }
+    for (let i = confetti.length - 1; i >= 0; i--) {
+      const c = confetti[i];
+      c.m.position.y += c.vy * dt; c.m.position.x += Math.sin(time * 3 + c.ph) * dt * .9;
+      c.m.rotation.x += c.sp * dt; c.m.rotation.z += c.sp * .7 * dt;
+      if (c.m.position.y < P.y - .3) { scene.remove(c.m); confetti.splice(i, 1); }
+    }
+  }
+
   function stageClear() {
-    state = 'clear'; clearPeaches();
+    state = 'clear'; clearPeaches(); P.vx = P.vz = 0; confettiT = 3.5;
     const bonus = 200 + lives * 100;
     score += bonus;
     if (score > best) { best = score; try { localStorage.setItem('apeachBest2', Math.floor(best)); } catch (e) {} }
     if (stage < 20) { unlocked = Math.max(unlocked, stage + 1); try { localStorage.setItem('apeachUnlocked', unlocked); } catch (e) {} }
     renderScore();
     [523, 659, 784, 1047].forEach((f, i) => beep(f, .25, 'triangle', .14, 0, i * .12));
-    setTimeout(() => {
+    setTimeout(() => { // 파티클을 볼 수 있게 잠시 뒤에 결과 화면 표시
       if (state !== 'clear') return;
       if (stage >= 20) { $('winScore').textContent = Math.floor(score) + '점'; showOnly('win'); return; }
       $('clearTitle').textContent = stage + '탄 클리어!';
@@ -455,7 +548,7 @@
       $('clearBonus').textContent = `클리어 보너스 +${bonus} (남은 목숨 ${lives}개 × 100 + 200)`;
       $('nextBtn').textContent = (stage + 1) + '탄으로';
       showOnly('clear');
-    }, 700);
+    }, 2400);
   }
 
   function gameOver() {
@@ -519,6 +612,25 @@
   const endJoy = e => { if (e.pointerId !== joyId) return; joyId = null; joy.x = joy.z = 0; stick.style.display = 'none'; knob.style.transform = ''; };
   padL.addEventListener('pointerup', endJoy); padL.addEventListener('pointercancel', endJoy);
   $('jumpBtn').addEventListener('pointerdown', e => { e.preventDefault(); jumpPress(); });
+  // 확대/축소: PC 마우스 휠, 모바일 두 손가락 핀치
+  const setZoom = z => { camZoom = clamp(z, .45, 2.5); };
+  addEventListener('wheel', e => { e.preventDefault(); setZoom(camZoom * Math.exp(e.deltaY * .0012)); }, { passive: false });
+  let pinchD = 0;
+  const touchDist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const pinchOk = e => joyId === null && e.touches.length === 2 && ![...e.touches].some(t => t.target === $('jumpBtn'));
+  addEventListener('touchstart', e => { pinchD = pinchOk(e) ? touchDist(e.touches) : 0; }, { passive: true });
+  addEventListener('touchmove', e => {
+    if (!pinchOk(e)) { pinchD = 0; return; }
+    const d = touchDist(e.touches);
+    if (pinchD > 0 && d > 0) setZoom(camZoom * pinchD / d); // 벌리면 확대(가까워짐)
+    pinchD = d;
+  }, { passive: true });
+  addEventListener('touchend', () => { pinchD = 0; }, { passive: true });
+  // 마우스 드래그로 시점 회전
+  let mouseDrag = false;
+  renderer.domElement.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') mouseDrag = true; });
+  addEventListener('pointerup', () => mouseDrag = false);
+  addEventListener('pointermove', e => { if (mouseDrag && e.pointerType === 'mouse' && state === 'play') camYaw -= e.movementX * .006; });
 
   // 버튼
   $('startBtn').onclick = () => beginStage(1, 0);
@@ -533,10 +645,11 @@
   // ================= 카메라 =================
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
   function camTargets() {
-    const far = camera.aspect < 1 ? 17 : 12;
-    return [new THREE.Vector3(P.x, P.y + 6.5, P.z + far), new THREE.Vector3(P.x, P.y + 5.2, P.z)];
+    // 어피치 뒤에서 바라보는 방향(camYawS)으로 따라가는 추적 시점
+    const far = (camera.aspect < 1 ? 12 : 9) * camZoomS, h = 2 + 3 * camZoomS, s = Math.sin(camYawS), c = Math.cos(camYawS);
+    return [new THREE.Vector3(P.x + s * far, P.y + h, P.z + c * far), new THREE.Vector3(P.x - s * 6, P.y + 5.2, P.z - c * 6)];
   }
-  function snapCamera() { const [a, b] = camTargets(); camPos.copy(a); camLook.copy(b); }
+  function snapCamera() { camYawS = camYaw; camZoomS = camZoom; const [a, b] = camTargets(); camPos.copy(a); camLook.copy(b); }
   addEventListener('resize', () => { renderer.setSize(W(), H()); camera.aspect = W() / H(); camera.updateProjectionMatrix(); });
 
   // ================= 업데이트 =================
@@ -565,17 +678,29 @@
 
   function updatePlayer(dt) {
     // 입력 → 목표 속도
-    let ix = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + joy.x;
-    let iz = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0) + joy.z;
+    // A/D(←/→): 시점 회전, W/S(↑/↓): 앞/뒤, Q/E: 옆걸음 (조이스틱: 좌우=회전, 상하=앞/뒤)
+    const turn = (keys.KeyA || keys.ArrowLeft ? 1 : 0) - (keys.KeyD || keys.ArrowRight ? 1 : 0) - joy.x;
+    camYaw += turn * 2.4 * dt;
+    const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) - joy.z;
+    const side = (keys.KeyE ? 1 : 0) - (keys.KeyQ ? 1 : 0);
+    let ix = side, iz = -fwd; // 카메라 기준 로컬 입력(오른쪽+, 뒤+)
     const m = Math.hypot(ix, iz); if (m > 1) { ix /= m; iz /= m; }
+    const cs = Math.cos(camYaw), sn = Math.sin(camYaw);
+    const wx = cs * ix + sn * iz, wz = -sn * ix + cs * iz; // 월드 방향으로 변환
     const k = 1 - Math.exp(-dt * 14);
-    P.vx += (ix * SPEED - P.vx) * k; P.vz += (iz * SPEED - P.vz) * k;
+    P.vx += (wx * SPEED - P.vx) * k; P.vz += (wz * SPEED - P.vz) * k;
 
     // 점프
     P.jumpBuf -= dt;
     if (P.cloud) P.coyote = .12; else P.coyote -= dt;
-    if (P.jumpBuf > 0 && (P.cloud || P.coyote > 0)) {
-      P.vy = JUMP_V; P.cloud = null; P.coyote = 0; P.jumpBuf = 0; beep(520, .15, 'triangle', .1, 400);
+    if (P.jumpBuf > 0) {
+      const jv = JUMP_V * (P.spring ? 1.41 : 1); // 스프링: 점프 높이 2배
+      if (P.cloud || P.coyote > 0) { // 1단 점프
+        P.vy = jv; P.cloud = null; P.coyote = 0; P.jumpBuf = 0; P.jumps = 1; beep(520, .15, 'triangle', .1, 400);
+      } else if (P.pogo && P.jumps < 2) { // 2단 점프 (콩콩이 효과)
+        P.vy = jv * .95; P.jumps = 2; P.jumpBuf = 0; beep(780, .16, 'triangle', .1, 500);
+        burst(new THREE.Vector3(P.x, P.y + .2, P.z), 7, 0xffffff);
+      }
     }
 
     // 이동 + 중력
@@ -594,7 +719,7 @@
       }
     }
     if (landed) {
-      const was = P.cloud; P.y = landed.pos.y; P.vy = 0; P.cloud = landed;
+      const was = P.cloud; P.y = landed.pos.y; P.vy = 0; P.cloud = landed; P.jumps = 0;
       if (was !== landed) onLand(landed);
     } else if (P.cloud) P.cloud = null;
 
@@ -663,11 +788,17 @@
 
   function animateApeach(dt) {
     const a = apeach, moving = clamp(Math.hypot(P.vx, P.vz) / SPEED, 0, 1), onGround = !!P.cloud;
-    const crying = state === 'over' || invuln > 0;
+    const crying = state === 'over' || (state === 'play' && invuln > 0);
     a.faceNormal.visible = !crying; a.faceCry.visible = crying;
     if (crying) a.tears.forEach(t => { t.scale.y = 1.7 + Math.sin(time * 9 + t.userData.ph) * .5; });
 
     a.root.position.set(P.x, P.y, P.z);
+    // 효과 받는 중이면 발밑에 색 링 표시
+    const pulse = 1 + Math.sin(time * 6) * .08;
+    auraSpring.visible = P.spring && state !== 'over'; auraPogo.visible = P.pogo && state !== 'over';
+    auraSpring.position.set(P.x, P.y + .06, P.z); auraSpring.scale.setScalar(pulse);
+    auraPogo.position.set(P.x, P.y + .1, P.z); auraPogo.scale.setScalar(1.25 * pulse);
+    if (state === 'clear' || state === 'win') a.root.position.y += Math.abs(Math.sin(time * 9)) * .5; // 신나서 통통
     if (state === 'over') {
       a.root.rotation.z += (Math.PI / 2 - a.root.rotation.z) * Math.min(1, dt * 5);
       a.root.position.y += .55 * clamp(a.root.rotation.z / (Math.PI / 2), 0, 1);
@@ -679,8 +810,12 @@
     const wave = 1.5 + Math.sin(time * 14) * 1.0;
     a.armL.rotation.z = -wave; a.armR.rotation.z = wave;
     // 이동 방향으로 몸을 돌림 (얼굴 정면 = +z)
-    if (Math.hypot(P.vx, P.vz) > .8) {
-      let d = Math.atan2(P.vx, P.vz) - P.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+    // 이동 중이면 이동 방향, 멈춰 있으면 카메라가 보는 방향(플레이 중)
+    let target = null;
+    if (Math.hypot(P.vx, P.vz) > .8) target = Math.atan2(P.vx, P.vz);
+    else if (state === 'play') target = camYaw + Math.PI;
+    if (target !== null) {
+      let d = target - P.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
       P.yaw += d * Math.min(1, dt * 14);
     }
     a.root.rotation.set(0, P.yaw, 0);
@@ -711,6 +846,8 @@
     if (state === 'play') { updatePlayer(dt); updateBar(); renderScore(); }
     else if (state === 'ready' && P.cloud) { P.x += P.cloud.dx; P.z += P.cloud.dz; }
     updatePeaches(dt);
+    updateConfetti(dt);
+    updateItems(dt);
     animateApeach(dt);
     syncGhost();
     { // 발밑에서 가장 가까운 블록 위에 그림자
@@ -730,8 +867,10 @@
 
     // 카메라
     shake = Math.max(0, shake - dt);
+    camYawS += (camYaw - camYawS) * (1 - Math.exp(-dt * 12));
+    camZoomS += (camZoom - camZoomS) * (1 - Math.exp(-dt * 10));
     const [tp, tl] = camTargets();
-    const kx = 1 - Math.exp(-dt * 6), ky = 1 - Math.exp(-dt * 4);
+    const kx = 1 - Math.exp(-dt * 14), ky = 1 - Math.exp(-dt * 6);
     camPos.x += (tp.x - camPos.x) * kx; camPos.z += (tp.z - camPos.z) * kx; camPos.y += (tp.y - camPos.y) * ky;
     camLook.x += (tl.x - camLook.x) * kx; camLook.z += (tl.z - camLook.z) * kx; camLook.y += (tl.y - camLook.y) * ky;
     camera.position.set(camPos.x + (Math.random() - .5) * shake * .6, camPos.y + (Math.random() - .5) * shake * .6, camPos.z);
