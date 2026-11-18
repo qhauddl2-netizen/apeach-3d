@@ -252,13 +252,27 @@
     g.fillStyle = '#b8ad98'; g.fillRect(0, 0, 128, 128);
     for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) { g.fillStyle = (i + j) % 2 ? '#f4ecdc' : '#fffaf0'; g.fillRect(i * 64 + 3, j * 64 + 3, 58, 58); }
   });
-  const BLOCK_COLORS = { start: [0xd9c7b0, 0xf0e6d2], normal: [0xe69a6a, 0xfff0d8], move: [0x6fb0ff, 0xd6ebff], crumble: [0xc4b8cc, 0xeee6f2], goal: [0xffd45e, 0xfff3b8] };
+  // 시작 블록 윗면: 석판 + 음각 "START" (UV 0~1 한 장으로 사용)
+  const texStart = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 512;
+    const g = c.getContext('2d');
+    g.fillStyle = '#b8ad98'; g.fillRect(0, 0, 512, 512);
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { g.fillStyle = (i + j) % 2 ? '#f4ecdc' : '#fffaf0'; g.fillRect(i * 128 + 4, j * 128 + 4, 120, 120); }
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = 'bold 128px "Arial Black", Impact, sans-serif';
+    const tx = 256, ty = 360;
+    g.fillStyle = 'rgba(255,255,255,.95)'; g.fillText('START', tx + 3, ty + 4);   // 아래쪽 하이라이트
+    g.fillStyle = 'rgba(70,50,35,.55)'; g.fillText('START', tx - 3, ty - 3);     // 위쪽 안쪽 그림자
+    g.fillStyle = '#a89274'; g.fillText('START', tx, ty);                         // 파인 면
+    const t = new THREE.CanvasTexture(c); t.anisotropy = 8; return t;
+  })();
+  const BLOCK_COLORS = { entry: [0xff9fbd, 0xfff0f4], start: [0xd9c7b0, 0xffffff], normal: [0xe69a6a, 0xfff0d8], move: [0x6fb0ff, 0xd6ebff], crumble: [0xc4b8cc, 0xeee6f2], goal: [0xffd45e, 0xfff3b8] };
   const blockMatCache = {};
   function blockMats(kind) {
     if (kind !== 'crumble' && blockMatCache[kind]) return blockMatCache[kind];
     const [sc, tc] = BLOCK_COLORS[kind];
     const side = new THREE.MeshLambertMaterial({ color: sc, map: kind === 'crumble' ? texCrack : texBrick });
-    const top = new THREE.MeshLambertMaterial({ color: tc, map: texTop });
+    const top = new THREE.MeshLambertMaterial({ color: tc, map: kind === 'start' ? texStart : texTop });
     if (kind === 'crumble') { side.transparent = top.transparent = true; }
     const r = { arr: [side, side, top, side, side, side], all: [side, top] };
     if (kind !== 'crumble') blockMatCache[kind] = r;
@@ -268,7 +282,7 @@
   function makeBlockMesh(hx, hz, kind) {
     const w = hx * 2, d = hz * 2, geo = new THREE.BoxGeometry(w, BLOCK_H, d);
     const uv = geo.attributes.uv, dims = [[d, BLOCK_H], [d, BLOCK_H], [w, d], [w, d], [w, BLOCK_H], [w, BLOCK_H]];
-    for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) { const i = f * 4 + k; uv.setXY(i, uv.getX(i) * dims[f][0] / TILE, uv.getY(i) * dims[f][1] / TILE); }
+    for (let f = 0; f < 6; f++) for (let k = 0; k < 4; k++) { if (kind === 'start' && f === 2) continue; const i = f * 4 + k; uv.setXY(i, uv.getX(i) * dims[f][0] / TILE, uv.getY(i) * dims[f][1] / TILE); }
     const m = blockMats(kind);
     const box = new THREE.Mesh(geo, m.arr); box.position.y = -BLOCK_H / 2;
     const g = new THREE.Group(); g.add(box);
@@ -303,18 +317,27 @@
     const moveP = s < 4 ? 0 : lerp(.12, .55, (s - 4) / 16);
     const crumbleP = s < 8 ? 0 : lerp(.12, .4, (s - 8) / 12);
 
-    let x = 0, y = 0, z = 0, prevHx = 4.5, prevHz = 4.5, ang = rnd() * 6.28, crumbleRun = 0;
+    // 코스는 카메라 정면(-z) 방향으로 시작 → 입장 길이 시야에 시원하게 보임
+    let x = 0, y = 0, z = 0, prevHx = 3.6, prevHz = 3.6, ang = -Math.PI / 2 + R(-.35, .35), crumbleRun = 0, idxN = 0;
     const add = (o) => {
       const { group, mats } = makeBlockMesh(o.hx, o.hz, o.kind);
       group.position.set(o.x, o.y, o.z); scene.add(group);
       // 부서지는 블록은 개별 재질이라 투명도/해제를 mat 객체로 한꺼번에 처리
       const mat = { set opacity(v) { mats.all.forEach(m => m.opacity = v); }, dispose() { if (o.kind === 'crumble') mats.all.forEach(m => m.dispose()); } };
-      const c = Object.assign({ mesh: group, mat, pos: new THREE.Vector3(o.x, o.y, o.z), base: { x: o.x, z: o.z }, dx: 0, dz: 0, solid: true, state: 'idle', timer: 0, jit: 0, i: stageClouds.length }, o);
+      const c = Object.assign({ mesh: group, mat, pos: new THREE.Vector3(o.x, o.y, o.z), base: { x: o.x, z: o.z }, dx: 0, dz: 0, solid: true, state: 'idle', timer: 0, jit: 0, i: (o.kind === 'start' || o.entry) ? 0 : ++idxN }, o);
       stageClouds.push(c); return c;
     };
-    add({ kind: 'start', r: 4.5, hx: 4.5, hz: 4.5, x: 0, y: 0, z: 0 });
+    add({ kind: 'start', r: 3.6, hx: 3.6, hz: 3.6, x: 0, y: 0, z: 0 });
     // 사각형 중심에서 진행 방향으로 가장자리까지의 거리
     const ext = (hx, hz, a) => 1 / Math.max(Math.abs(Math.cos(a)) / hx, Math.abs(Math.sin(a)) / hz);
+
+    // 입장 길: 시작 블록에서 코스로 이어지는 분홍색 디딤돌 3개 (층수/점수에는 포함하지 않음)
+    for (let k = 0; k < 3; k++) {
+      const hx = 1.5, hz = 1.5, dist = ext(prevHx, prevHz, ang) + ext(hx, hz, ang) + .7;
+      x += Math.cos(ang) * dist; z += Math.sin(ang) * dist; y += .75;
+      add({ kind: 'entry', entry: true, r: hx, hx, hz, x, y, z });
+      prevHx = hx; prevHz = hz;
+    }
 
     for (let i = 1; i <= n; i++) {
       const last = i === n;
@@ -324,7 +347,7 @@
       ang += R(-1.2, 1.2);
       const distFor = a => ext(prevHx, prevHz, a) + ext(hx, hz, a) + gap;
       let dist = distFor(ang), nx = x + Math.cos(ang) * dist, nz = z + Math.sin(ang) * dist;
-      if (Math.hypot(nx, nz) > 13) { ang = Math.atan2(-z, -x) + R(-.6, .6); dist = distFor(ang); nx = x + Math.cos(ang) * dist; nz = z + Math.sin(ang) * dist; }
+      if (Math.hypot(nx, nz + 10) > 13) { ang = Math.atan2(-10 - z, -x) + R(-.6, .6); dist = distFor(ang); nx = x + Math.cos(ang) * dist; nz = z + Math.sin(ang) * dist; }
       x = nx; z = nz; y += lerp(1.2, 2.1, t) * R(.85, 1.05);
       let kind = 'normal';
       if (!last) {
@@ -454,8 +477,8 @@
   let spawnT = 1, rainCd = 10, rainLeft = 0, rainT = 0, maxIdx = 0, checkpoint = null, clearBonusText = '';
   let best = 0, unlocked = 1;
   try { best = +localStorage.getItem('apeachBest2') || 0; unlocked = clamp(+localStorage.getItem('apeachUnlocked') || 1, 1, 20); } catch (e) {}
-  const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, cloud: null, coyote: 0, jumpBuf: 0, yaw: 0, jumps: 0, spring: false, pogo: false };
-  let camZoom = 1, camZoomS = 1; // 확대/축소 배율 (작을수록 가까움)
+  const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, cloud: null, coyote: 0, jumpBuf: 0, yaw: 0, jumps: 0, spring: false, pogo: false, front: true };
+  let camZoom = 1.6, camZoomS = 1.6; // 확대/축소 배율 (작을수록 가까움). 시작은 조금 멀리서
   let camOff = 0; // 드래그로 돌린 임시 시점 보정값 (이동하면 0으로 돌아옴)
   let camYaw = 0, camYawS = 0; // 카메라가 바라보는 방향(목표/부드러운 값). 0이면 -z 방향을 봄
   const keys = {}; const joy = { x: 0, z: 0 };
@@ -479,7 +502,7 @@
     score = carryScore; stageStartScore = carryScore;
     clearPeaches(); clearConfetti(); clearItems();
     P.spring = P.pogo = false; itemT = 4; updateFxHud(); // 탄이 바뀌면 아이템 효과 초기화
-    buildStage(s); resetPlayerToStart(); P.yaw = Math.PI; snapCamera();
+    buildStage(s); resetPlayerToStart(); P.yaw = 0; P.front = true; snapCamera(); // 시작은 정면(화면 쪽)을 바라봄
     $('stageLbl').textContent = s + '탄';
     renderLives(); renderScore(); updateBar();
     showOnly(null); state = 'play';
@@ -510,7 +533,7 @@
   function spawnItem() {
     if (items.length >= 2) return;
     const types = ['spring', 'pogo'].filter(t => !P[t] && !items.some(it => it.type === t));
-    const cands = stageClouds.filter(c => c.solid && c.kind !== 'crumble' && c.kind !== 'start' && !c.goal && c.i >= maxIdx - 1 && c.i <= maxIdx + 6 && !items.some(it => it.c === c));
+    const cands = stageClouds.filter(c => c.solid && c.kind !== 'crumble' && c.kind !== 'start' && !c.entry && !c.goal && c.i >= maxIdx - 1 && c.i <= maxIdx + 6 && !items.some(it => it.c === c));
     if (!types.length || !cands.length) return;
     const type = types[(Math.random() * types.length) | 0], c = cands[(Math.random() * cands.length) | 0];
     const mesh = makeItemMesh(type); scene.add(mesh);
@@ -659,10 +682,9 @@
   addEventListener('wheel', e => { e.preventDefault(); setZoom(camZoom * Math.exp(e.deltaY * .0012)); }, { passive: false });
   let pinchD = 0;
   const touchDist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-  const pinchOk = e => e.touches.length === 2 && ![...e.touches].some(t => t.target === $('jumpBtn'));
-  const releaseJoy = () => { joyId = null; joy.x = joy.z = 0; stick.style.display = 'none'; knob.style.transform = ''; };
-  // 두 손가락이 닿으면 조이스틱을 해제하고 핀치 줌을 우선한다
-  addEventListener('touchstart', e => { if (pinchOk(e)) { pinchD = touchDist(e.touches); releaseJoy(); lookId = null; } else pinchD = 0; }, { passive: true });
+  // 핀치는 조이스틱을 쓰고 있지 않을 때만. (조이스틱 + 다른 손가락 = 이동하면서 시점 회전 드래그)
+  const pinchOk = e => joyId === null && e.touches.length === 2 && ![...e.touches].some(t => t.target === $('jumpBtn'));
+  addEventListener('touchstart', e => { if (pinchOk(e)) { pinchD = touchDist(e.touches); lookId = null; } else pinchD = 0; }, { passive: true });
   // iOS 사파리 기본 확대 제스처 차단
   ['gesturestart', 'gesturechange', 'gestureend'].forEach(n => addEventListener(n, e => e.preventDefault(), { passive: false }));
   addEventListener('touchmove', e => {
@@ -675,7 +697,7 @@
   // 마우스 드래그로 시점 회전
   // (PC: 마우스 드래그 / 모바일: 한 손가락 좌우 드래그) → 시점과 어피치의 정면 방향을 함께 돌림
   let mouseDrag = false, lookId = null, lookX = 0;
-  const addLook = d => { camYaw += d; };
+  const addLook = d => { camYaw += d; P.front = false; };
   renderer.domElement.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse') mouseDrag = true;
     else if (lookId === null) { lookId = e.pointerId; lookX = e.clientX; }
@@ -685,7 +707,7 @@
   addEventListener('pointermove', e => {
     if (state !== 'play') return;
     if (e.pointerType === 'mouse') { if (mouseDrag) addLook(-e.movementX * .006); }
-    else if (e.pointerId === lookId) { addLook(-(e.clientX - lookX) * .008); lookX = e.clientX; }
+    else if (e.pointerId === lookId) { addLook(-(e.clientX - lookX) * .012); lookX = e.clientX; }
   });
 
   // 버튼
@@ -741,7 +763,7 @@
     const fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) - joy.z;
     const side = (keys.KeyE ? 1 : 0) - (keys.KeyQ ? 1 : 0);
     // 다시 움직이면 어피치 뒤(기본 추적 시점)로 부드럽게 복귀
-    if (turn || fwd || side) { camOff *= Math.exp(-dt * 5); if (Math.abs(camOff) < .01) camOff = 0; }
+    if (turn || fwd || side) { P.front = false; camOff *= Math.exp(-dt * 5); if (Math.abs(camOff) < .01) camOff = 0; }
     let ix = side, iz = -fwd; // 카메라 기준 로컬 입력(오른쪽+, 뒤+)
     const m = Math.hypot(ix, iz); if (m > 1) { ix /= m; iz /= m; }
     const cs = Math.cos(camYaw), sn = Math.sin(camYaw);
@@ -872,7 +894,7 @@
     // 이동 중이면 이동 방향, 멈춰 있으면 카메라가 보는 방향(플레이 중)
     let target = null;
     if (Math.hypot(P.vx, P.vz) > .8) target = Math.atan2(P.vx, P.vz);
-    else if (state === 'play') target = camYaw + Math.PI;
+    else if (state === 'play') target = camYaw + (P.front ? 0 : Math.PI); // 첫 조작 전엔 정면(카메라 쪽)
     if (target !== null) {
       let d = target - P.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
       P.yaw += d * Math.min(1, dt * 14);
