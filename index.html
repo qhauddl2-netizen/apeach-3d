@@ -56,6 +56,25 @@
   .big{font-size:clamp(26px,5vw,42px);font-weight:900;text-shadow:0 3px 0 #e0709a}
   button{margin:14px 6px 0;padding:13px 38px;font-size:22px;font-weight:900;color:#fff;background:#ff7fa8;border:none;border-radius:40px;cursor:pointer;box-shadow:0 6px 0 #d95b87;font-family:inherit}
   button.sub{background:#b79cff;box-shadow:0 6px 0 #8c73d6}
+  button:disabled{opacity:.6;cursor:default}
+  input.nickInput{margin-top:12px;padding:10px 16px;font-size:20px;border-radius:30px;border:3px solid #fff;text-align:center;background:rgba(255,255,255,.9);color:#7a3550;width:min(260px,70vw);font-family:inherit;outline:none;-webkit-user-select:text;user-select:text}
+  /* 랭킹 관련 버튼: 금색(등록) / 하늘색(보기) 으로 다른 버튼과 구분 */
+  button.btnGold{background:linear-gradient(#ffd54d,#ffae1a);color:#6b3a00;text-shadow:0 1px 0 rgba(255,255,255,.6);box-shadow:0 6px 0 #c98200;border:3px solid #fff3c4}
+  button.btnBlue{background:linear-gradient(#6cc4ff,#3b97f0);box-shadow:0 6px 0 #2468b5;border:3px solid #d6efff}
+  button.btnGold:active,button.btnBlue:active{transform:translateY(4px)}
+  button.btnGold:active{box-shadow:0 2px 0 #c98200}
+  button.btnBlue:active{box-shadow:0 2px 0 #2468b5}
+  #rank{background:rgba(48,30,96,.82)}
+  #rankList{width:min(540px,92vw);max-height:52vh;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;background:#fffdf8;border:4px solid #ff8fb4;border-radius:18px;padding:4px 8px;text-align:left;margin-top:8px;box-sizing:border-box;color:#6b3550;font-weight:700;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+  .rrow{display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid #f3dce6;font-size:17px;color:#6b3550}
+  .rrow:nth-child(even){background:#fff1f6}
+  .rrow .rk{width:44px;font-weight:900;text-align:center}
+  .rrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rrow .st{width:42px;font-size:14px;opacity:.9}
+  .rrow .sc{width:74px;text-align:right;font-weight:900}
+  .rrow.me,.rrow.me:nth-child(even){background:#ffe27a;border-radius:10px;color:#5a3000}
+  #rankMe{min-height:24px;font-size:18px;font-weight:700;text-shadow:0 2px 0 #e0709a}
+  #rankFab{position:fixed;top:68px;right:14px;width:44px;height:44px;margin:0;padding:0;font-size:22px;z-index:6;background:linear-gradient(#ffd54d,#ffae1a);border:3px solid #fff3c4;box-shadow:0 4px 0 #c98200}
   button:active{transform:translateY(4px);box-shadow:0 2px 0 #d95b87}
   #touch{display:none}
   body.touch #touch{display:block}
@@ -72,10 +91,12 @@
   <div id="lives"></div>
 </div>
 <div id="banner"></div>
+<button id="rankFab" tabindex="-1" title="랭킹">🏆</button>
 
 <div id="start" class="overlay">
-  <h1>🧱 어피치 하늘 오르기 🍑</h1>
+  <h1>어피치 하늘 오르기 🍑</h1>
   <div><button id="startBtn">1탄부터 시작</button><button id="contBtn" class="sub" style="display:none">이어하기</button></div>
+  <div><button id="rankStartBtn" class="btnBlue">🏆 랭킹 보기</button></div>
 </div>
 <div id="clear" class="overlay hidden">
   <h1 id="clearTitle">1탄 클리어!</h1>
@@ -87,17 +108,29 @@
   <h1>게임 오버</h1>
   <div class="big" id="final"></div>
   <p id="newbest"></p>
+  <input class="nickInput" maxlength="10" placeholder="닉네임" autocomplete="off">
+  <div><button class="regBtn btnGold">📝 랭킹 등록</button><button class="rankBtn btnBlue">🏆 랭킹 보기</button></div>
   <div><button id="retryBtn">이 탄 다시하기</button><button id="restartBtn" class="sub">처음부터</button></div>
 </div>
 <div id="win" class="overlay hidden">
   <h1>🎉 올 클리어! 🎉</h1>
   <p>어피치가 20탄 하늘 끝까지 올라갔어요!</p>
   <div class="big" id="winScore"></div>
+  <input class="nickInput" maxlength="10" placeholder="닉네임" autocomplete="off">
+  <div><button class="regBtn btnGold">📝 랭킹 등록</button><button class="rankBtn btnBlue">🏆 랭킹 보기</button></div>
   <button id="againBtn">처음부터 다시</button>
+</div>
+<div id="rank" class="overlay hidden">
+  <h1>🏆 랭킹 TOP 100</h1>
+  <div id="rankMe"></div>
+  <div id="rankList"></div>
+  <button id="rankClose">닫기</button>
 </div>
 
 <div id="touch"><div id="padL"></div><div id="stick"><div id="knob"></div></div><button id="jumpBtn">JUMP</button></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (() => {
@@ -479,6 +512,7 @@
   try { best = +localStorage.getItem('apeachBest2') || 0; unlocked = clamp(+localStorage.getItem('apeachUnlocked') || 1, 1, 20); } catch (e) {}
   const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, cloud: null, coyote: 0, jumpBuf: 0, yaw: 0, jumps: 0, spring: false, pogo: false, front: true };
   let camZoom = 1.6, camZoomS = 1.6; // 확대/축소 배율 (작을수록 가까움). 시작은 조금 멀리서
+  let paused = false; // 랭킹 화면을 열면 게임 일시정지
   let camOff = 0; // 드래그로 돌린 임시 시점 보정값 (이동하면 0으로 돌아옴)
   let camYaw = 0, camYawS = 0; // 카메라가 바라보는 방향(목표/부드러운 값). 0이면 -z 방향을 봄
   const keys = {}; const joy = { x: 0, z: 0 };
@@ -607,7 +641,7 @@
     [523, 659, 784, 1047].forEach((f, i) => beep(f, .25, 'triangle', .14, 0, i * .12));
     setTimeout(() => { // 파티클을 볼 수 있게 잠시 뒤에 결과 화면 표시
       if (state !== 'clear') return;
-      if (stage >= 20) { $('winScore').textContent = Math.floor(score) + '점'; showOnly('win'); return; }
+      if (stage >= 20) { lastRun = { score: Math.floor(score), stage }; regDone = false; resetRegBtns(); $('winScore').textContent = Math.floor(score) + '점'; showOnly('win'); return; }
       $('clearTitle').textContent = stage + '탄 클리어!';
       $('clearScore').textContent = Math.floor(score) + '점';
       $('clearBonus').textContent = `클리어 보너스 +${bonus} (남은 목숨 ${lives}개 × 100 + 200)`;
@@ -620,6 +654,7 @@
     state = 'over';
     const nb = score > best;
     if (nb) { best = score; try { localStorage.setItem('apeachBest2', Math.floor(best)); } catch (e) {} }
+    lastRun = { score: Math.floor(score), stage }; regDone = false; resetRegBtns();
     $('final').textContent = stage + '탄 · ' + Math.floor(score) + '점';
     $('newbest').textContent = nb ? '🎉 최고 기록 갱신!' : '최고 기록 ' + Math.floor(best) + '점';
     renderScore();
@@ -647,8 +682,10 @@
   }
 
   // ================= 입력 =================
-  function jumpPress() { if (state === 'play') P.jumpBuf = .12; }
+  function jumpPress() { if (state === 'play' && !paused) P.jumpBuf = .12; }
   addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') return; // 닉네임 입력 중에는 게임 키 무시
+    if (e.code === 'Escape' && !$('rank').classList.contains('hidden')) { closeRank(); return; }
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
     if (e.repeat) return;
     keys[e.code] = true;
@@ -679,7 +716,7 @@
   $('jumpBtn').addEventListener('pointerdown', e => { e.preventDefault(); jumpPress(); });
   // 확대/축소: PC 마우스 휠, 모바일 두 손가락 핀치
   const setZoom = z => { camZoom = clamp(z, .45, 2.5); };
-  addEventListener('wheel', e => { e.preventDefault(); setZoom(camZoom * Math.exp(e.deltaY * .0012)); }, { passive: false });
+  addEventListener('wheel', e => { if (e.target.closest && e.target.closest('#rankList')) return; e.preventDefault(); setZoom(camZoom * Math.exp(e.deltaY * .0012)); }, { passive: false });
   let pinchD = 0;
   const touchDist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   // 핀치는 조이스틱을 쓰고 있지 않을 때만. (조이스틱 + 다른 손가락 = 이동하면서 시점 회전 드래그)
@@ -719,6 +756,95 @@
   $('againBtn').onclick = () => beginStage(1, 0);
   function refreshStartUI() { const c = $('contBtn'); c.style.display = unlocked > 1 ? '' : 'none'; c.textContent = `이어하기 (${unlocked}탄)`; }
   refreshStartUI();
+
+  // ================= 랭킹 (Firebase Firestore) =================
+  // ★ Firebase 콘솔 → 프로젝트 설정 → 내 앱(웹)의 firebaseConfig 값을 여기에 붙여넣으세요.
+  const FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyCHmm1o5GNvt5tHlRni4s8mg6Zr0zScZgw',
+    authDomain: 'apeach-3d.firebaseapp.com',
+    projectId: 'apeach-3d',
+    storageBucket: 'apeach-3d.firebasestorage.app',
+    messagingSenderId: '441185624216',
+    appId: '1:441185624216:web:4df3dccb9c79989002b0ed'
+  };
+  let db = null;
+  try {
+    if (window.firebase && !String(FIREBASE_CONFIG.apiKey).startsWith('YOUR_')) { firebase.initializeApp(FIREBASE_CONFIG); db = firebase.firestore(); }
+  } catch (e) { console.warn('Firebase 초기화 실패', e); }
+
+  // 기기별 랜덤 ID = 문서 ID (한 사람당 최고 점수 하나)
+  let playerId = '';
+  try { playerId = localStorage.getItem('apeachPid') || ''; if (!playerId) { playerId = 'p' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('apeachPid', playerId); } }
+  catch (e) { playerId = 'p' + Math.random().toString(36).slice(2); }
+
+  let lastRun = null, regDone = false, rankPrev = null, rankNote = '';
+  const nickInputs = [...document.querySelectorAll('.nickInput')], regBtns = [...document.querySelectorAll('.regBtn')];
+  try { const nm = localStorage.getItem('apeachName') || ''; nickInputs.forEach(i => i.value = nm); } catch (e) {}
+  nickInputs.forEach(inp => {
+    inp.addEventListener('input', () => { nickInputs.forEach(o => { if (o !== inp) o.value = inp.value; }); try { localStorage.setItem('apeachName', inp.value.trim()); } catch (e) {} });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); registerScore(); } });
+  });
+  function resetRegBtns() { regBtns.forEach(b => { b.disabled = false; b.textContent = '📝 랭킹 등록'; }); }
+
+  async function submitScore(name, sc, st) {
+    const ref = db.collection('scores').doc(playerId);
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(ref);
+      if (snap.exists && snap.data().score >= sc) { tx.update(ref, { name }); return; } // 기존 최고점이 더 높으면 닉네임만 갱신
+      tx.set(ref, { name, score: sc, stage: st, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    });
+  }
+  async function loadTop() {
+    const snap = await db.collection('scores').orderBy('score', 'desc').limit(100).get();
+    return snap.docs.map(d => Object.assign({ id: d.id }, d.data()));
+  }
+  function renderRank(list, note) {
+    const box = $('rankList'); box.textContent = '';
+    const mk = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; return s; };
+    if (!list.length) box.textContent = '아직 등록된 기록이 없어요. 첫 번째 주인공이 되어 보세요!';
+    let mineRow = null, myRank = 0;
+    list.forEach((r, i) => {
+      const row = document.createElement('div'); row.className = 'rrow' + (r.id === playerId ? ' me' : '');
+      row.append(mk('rk', ['🥇', '🥈', '🥉'][i] || (i + 1)), mk('nm', r.name || '이름없음'), mk('st', (r.stage || 1) + '탄'), mk('sc', (r.score || 0).toLocaleString()));
+      box.appendChild(row);
+      if (r.id === playerId) { mineRow = row; myRank = i + 1; }
+    });
+    if (mineRow) box.scrollTop = Math.max(0, mineRow.offsetTop - box.clientHeight / 2);
+    const mine = myRank ? `내 순위: ${myRank}위` : (lastRun && regDone ? '내 점수는 100위 밖이에요' : '');
+    $('rankMe').textContent = [note, mine].filter(Boolean).join(' · ');
+  }
+  async function openRank() {
+    if (!$('rank').classList.contains('hidden')) return;
+    const vis = ['start', 'clear', 'over', 'win'].find(id => !$(id).classList.contains('hidden'));
+    rankPrev = vis || null; if (vis) $(vis).classList.add('hidden');
+    if (state === 'play') paused = true; // 게임 중이면 일시정지
+    $('rank').classList.remove('hidden');
+    const note = rankNote; rankNote = '';
+    $('rankMe').textContent = note; $('rankList').textContent = '불러오는 중…';
+    if (!db) { $('rankList').textContent = '랭킹 서버가 아직 연결되지 않았어요. (Firebase 설정 필요)'; return; }
+    try { renderRank(await loadTop(), note); }
+    catch (e) { console.warn(e); $('rankList').textContent = '랭킹을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.'; }
+  }
+  function closeRank() {
+    $('rank').classList.add('hidden');
+    if (rankPrev) $(rankPrev).classList.remove('hidden');
+    rankPrev = null; paused = false;
+  }
+  async function registerScore() {
+    const name = (nickInputs[0] ? nickInputs[0].value : '').trim().slice(0, 10);
+    if (!name) { nickInputs.forEach(i => { i.placeholder = '닉네임을 입력해 주세요!'; }); const v = nickInputs.find(i => i.offsetParent); if (v) v.focus(); return; }
+    if (!lastRun || regDone) { openRank(); return; }
+    if (!db) { rankNote = ''; openRank(); return; }
+    regBtns.forEach(b => { b.disabled = true; b.textContent = '등록 중…'; });
+    try { await submitScore(name, lastRun.score, lastRun.stage); regDone = true; regBtns.forEach(b => { b.textContent = '등록 완료 ✓'; }); }
+    catch (e) { console.warn(e); rankNote = '등록에 실패했어요'; resetRegBtns(); }
+    openRank();
+  }
+  $('rankFab').onclick = () => { $('rankFab').blur(); openRank(); };
+  $('rankStartBtn').onclick = openRank;
+  document.querySelectorAll('.rankBtn').forEach(b => b.onclick = openRank);
+  regBtns.forEach(b => b.onclick = registerScore);
+  $('rankClose').onclick = closeRank;
 
   // ================= 카메라 =================
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
@@ -921,7 +1047,7 @@
 
   function loop() {
     requestAnimationFrame(loop);
-    const dt = Math.min(clock.getDelta(), .05); time += dt;
+    const rawDt = clock.getDelta(), dt = paused ? 0 : Math.min(rawDt, .05); time += dt;
 
     updateClouds(dt);
     if (state === 'play') { updatePlayer(dt); updateBar(); renderScore(); }
