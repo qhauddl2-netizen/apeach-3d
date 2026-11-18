@@ -513,6 +513,7 @@
   const P = { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, cloud: null, coyote: 0, jumpBuf: 0, yaw: 0, jumps: 0, spring: false, pogo: false, front: true };
   let camZoom = 1.6, camZoomS = 1.6; // 확대/축소 배율 (작을수록 가까움). 시작은 조금 멀리서
   let paused = false; // 랭킹 화면을 열면 게임 일시정지
+  let camPitch = 0, camPitchS = 0; // 위아래 시점(+: 위에서 내려다봄, -: 올려다봄)
   let camOff = 0; // 드래그로 돌린 임시 시점 보정값 (이동하면 0으로 돌아옴)
   let camYaw = 0, camYawS = 0; // 카메라가 바라보는 방향(목표/부드러운 값). 0이면 -z 방향을 봄
   const keys = {}; const joy = { x: 0, z: 0 };
@@ -528,7 +529,7 @@
     const c = stageClouds[0];
     P.x = c.pos.x; P.y = c.pos.y; P.z = c.pos.z; P.vx = P.vy = P.vz = 0; P.cloud = c; P.coyote = 0; P.jumpBuf = 0;
     checkpoint = c; maxIdx = 0;
-    P.yaw = 0; camYaw = camYawS = 0; camOff = 0; apeach.root.rotation.set(0, 0, 0); apeach.body.rotation.x = 0;
+    P.yaw = 0; camYaw = camYawS = 0; camOff = 0; camPitch = camPitchS = 0; apeach.root.rotation.set(0, 0, 0); apeach.body.rotation.x = 0;
   }
 
   function beginStage(s, carryScore) {
@@ -733,18 +734,22 @@
   addEventListener('touchend', () => { pinchD = 0; }, { passive: true });
   // 마우스 드래그로 시점 회전
   // (PC: 마우스 드래그 / 모바일: 한 손가락 좌우 드래그) → 시점과 어피치의 정면 방향을 함께 돌림
-  let mouseDrag = false, lookId = null, lookX = 0;
+  let mouseDrag = false, lookId = null, lookX = 0, lookY = 0;
   const addLook = d => { camYaw += d; P.front = false; };
+  const addPitch = d => { camPitch = clamp(camPitch + d, -.75, .95); }; // 아래로 드래그 = 아래를 내려다봄
   renderer.domElement.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse') mouseDrag = true;
-    else if (lookId === null) { lookId = e.pointerId; lookX = e.clientX; }
+    else if (lookId === null) { lookId = e.pointerId; lookX = e.clientX; lookY = e.clientY; }
   });
   const endLook = e => { if (e.pointerType === 'mouse') mouseDrag = false; if (e.pointerId === lookId) lookId = null; };
   addEventListener('pointerup', endLook); addEventListener('pointercancel', endLook);
   addEventListener('pointermove', e => {
     if (state !== 'play') return;
-    if (e.pointerType === 'mouse') { if (mouseDrag) addLook(-e.movementX * .006); }
-    else if (e.pointerId === lookId) { addLook(-(e.clientX - lookX) * .012); lookX = e.clientX; }
+    if (e.pointerType === 'mouse') { if (mouseDrag) { addLook(-e.movementX * .006); addPitch(e.movementY * .005); } }
+    else if (e.pointerId === lookId) {
+      addLook(-(e.clientX - lookX) * .012); addPitch((e.clientY - lookY) * .008);
+      lookX = e.clientX; lookY = e.clientY;
+    }
   });
 
   // 버튼
@@ -851,9 +856,11 @@
   function camTargets() {
     // 어피치 뒤에서 바라보는 방향(camYawS)으로 따라가는 추적 시점
     const far = (camera.aspect < 1 ? 12 : 9) * camZoomS, h = 2 + 3 * camZoomS, s = Math.sin(camYawS), c = Math.cos(camYawS);
-    return [new THREE.Vector3(P.x + s * far, P.y + h, P.z + c * far), new THREE.Vector3(P.x - s * 6, P.y + 5.2, P.z - c * 6)];
+    // 어피치를 중심으로 위아래(pitch)로 도는 궤도 카메라. pitch 0 = 기본 높이
+    const D = Math.hypot(far, h), e = clamp(Math.atan2(h, far) + camPitchS, .02, 1.4), ty = Math.max(.5, 5.2 - camPitchS * 9);
+    return [new THREE.Vector3(P.x + s * D * Math.cos(e), P.y + D * Math.sin(e), P.z + c * D * Math.cos(e)), new THREE.Vector3(P.x - s * 6, P.y + ty, P.z - c * 6)];
   }
-  function snapCamera() { camYawS = camYaw; camZoomS = camZoom; const [a, b] = camTargets(); camPos.copy(a); camLook.copy(b); }
+  function snapCamera() { camYawS = camYaw; camZoomS = camZoom; camPitchS = camPitch; const [a, b] = camTargets(); camPos.copy(a); camLook.copy(b); }
   addEventListener('resize', () => { renderer.setSize(W(), H()); camera.aspect = W() / H(); camera.updateProjectionMatrix(); });
 
   // ================= 업데이트 =================
@@ -1076,6 +1083,7 @@
     shake = Math.max(0, shake - dt);
     camYawS += (camYaw + camOff - camYawS) * (1 - Math.exp(-dt * 12));
     camZoomS += (camZoom - camZoomS) * (1 - Math.exp(-dt * 10));
+    camPitchS += (camPitch - camPitchS) * (1 - Math.exp(-dt * 12));
     const [tp, tl] = camTargets();
     const kx = 1 - Math.exp(-dt * 14), ky = 1 - Math.exp(-dt * 6);
     camPos.x += (tp.x - camPos.x) * kx; camPos.z += (tp.z - camPos.z) * kx; camPos.y += (tp.y - camPos.y) * ky;
